@@ -15,6 +15,7 @@
 """Test Case Controller"""
 
 import copy
+import yaml
 
 from core.common import utils
 from core.common.log import LOGGER
@@ -70,23 +71,55 @@ class TestCaseController:
 
     @classmethod
     def _parse_algorithms_config(cls, config):
-        algorithms = []
-        for algorithm_config in config:
+        if config is None:
+            raise ValueError("algorithms configuration cannot be None.")
+        if not isinstance(config, list):
+            raise ValueError(
+                f"expected list of algorithm configurations, got {type(config).__name__}."
+            )
+        if len(config) == 0:
+            return []
+
+        new_algorithms = []
+        for index, algorithm_config in enumerate(config):
+            if not isinstance(algorithm_config, dict):
+                raise ValueError(
+                    f"Invalid algorithm configuration at index {index}: expected dict, got {type(algorithm_config).__name__}."
+                )
+
             name = algorithm_config.get("name")
+            if not name or not isinstance(name, str):
+                raise ValueError(
+                    f"Missing or invalid mandatory key 'name' in algorithm configuration at index {index}."
+                )
+
             config_file = algorithm_config.get("url")
+            if not config_file or not isinstance(config_file, str):
+                raise ValueError(
+                    f"Missing or invalid mandatory key 'url' for algorithm '{name}' at index {index}."
+                )
+
             if not utils.is_local_file(config_file):
                 raise RuntimeError(f"not found algorithm config file({config_file}) in local")
 
             try:
-                config = utils.yaml2dict(config_file)
-                algorithm = Algorithm(name, config)
-                algorithms.append(algorithm)
-            except Exception as err:
-                raise RuntimeError(f"algorithm config file({config_file} is not supported, "
-                                f"error: {err}") from err
+                raw_config = utils.yaml2dict(config_file)
+            except yaml.YAMLError as err:
+                raise RuntimeError(
+                    f"algorithm '{name}' (index {index}): invalid YAML in {config_file}: {err}"
+                ) from err
+            except OSError as err:
+                raise RuntimeError(
+                    f"algorithm '{name}' (index {index}): cannot read {config_file}: {err}"
+                ) from err
 
-        new_algorithms = []
-        for algorithm in algorithms:
+            try:
+                algorithm = Algorithm(name, raw_config)
+            except Exception as err:  # pylint: disable=broad-except
+                raise RuntimeError(
+                    f"algorithm '{name}' (index {index}): failed to initialize from {config_file}, error: {err}"
+                ) from err
+
             for modules in algorithm.modules_list:
                 new_algorithm = copy.deepcopy(algorithm)
                 new_algorithm.modules = modules
